@@ -1,8 +1,9 @@
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const TICK_MS = 30 * 1000;
 const LONG_OPEN_MS = 30 * 60 * 1000;
+const HISTORY_LOOKBACK_DAYS = 10;
 
 class HADoorWindowCard extends HTMLElement {
   constructor() {
@@ -73,8 +74,10 @@ class HADoorWindowCard extends HTMLElement {
     this._fetching = true;
     const today = new Date().toDateString();
     try {
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
+      // Looks back several days (not just "since midnight") so the true start of an
+      // in-progress open period can be recovered from recorder history after an HA
+      // restart, when the entity's own last_changed resets to the restart time.
+      const start = new Date(Date.now() - HISTORY_LOOKBACK_DAYS * 86400000);
       const path = `history/period/${encodeURIComponent(start.toISOString())}?filter_entity_id=${encodeURIComponent(ids.join(","))}&minimal_response&no_attributes`;
       const result = await this._hass.callApi("GET", path);
       const history = {};
@@ -127,34 +130,56 @@ class HADoorWindowCard extends HTMLElement {
 
   _statsFor(item) {
     const now = Date.now();
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
     const series = this._history[item.entity] || [];
+    const live = this._s(item.entity);
+    const isOpen = live?.state === "on";
+
+    // "Opened since" comes from the recorder history's last state-change row, not the live
+    // entity's last_changed attribute. last_changed resets to the moment of the last HA Core
+    // restart, which would otherwise silently reset this counter for a door/window that was
+    // already open before the restart — recorder history rows persist across restarts.
+    let openSinceTs;
+    if (series.length && series[series.length - 1].state === "on") {
+      const t = new Date(series[series.length - 1].last_changed || series[series.length - 1].last_updated).getTime();
+      if (Number.isFinite(t)) openSinceTs = t;
+    }
+    if (openSinceTs === undefined && live?.last_changed) {
+      const t = new Date(live.last_changed).getTime();
+      if (Number.isFinite(t)) openSinceTs = t;
+    }
+
+    // Today-only counters: walk the (multi-day) series but clamp to todayStartMs, so history
+    // from earlier days only establishes whether the sensor was already open going into today.
     let openCount = 0;
     let lastOpenedTs;
     let totalOpenMs = 0;
     let prevState;
-    let prevTime;
-    series.forEach((row, i) => {
-      const state = row.state;
+    let prevTime = todayStartMs;
+    series.forEach((row) => {
       const time = new Date(row.last_changed || row.last_updated).getTime();
       if (!Number.isFinite(time)) return;
-      if (prevState === "on" && prevTime !== undefined) totalOpenMs += Math.max(0, time - prevTime);
-      if (state === "on" && prevState !== "on") {
-        lastOpenedTs = time;
-        if (i > 0) openCount += 1;
+      if (time < todayStartMs) {
+        prevState = row.state;
+        prevTime = todayStartMs;
+        return;
       }
-      prevState = state;
+      if (prevState === "on") totalOpenMs += Math.max(0, time - prevTime);
+      if (row.state === "on" && prevState !== "on") {
+        lastOpenedTs = time;
+        openCount += 1;
+      }
+      prevState = row.state;
       prevTime = time;
     });
-    const live = this._s(item.entity);
-    const isOpen = live?.state === "on";
-    const liveSince = live?.last_changed ? new Date(live.last_changed).getTime() : undefined;
-    if (isOpen && Number.isFinite(liveSince)) {
-      totalOpenMs += Math.max(0, now - Math.max(liveSince, prevTime ?? liveSince));
-      if (lastOpenedTs === undefined) lastOpenedTs = liveSince;
-    } else if (prevState === "on" && prevTime !== undefined) {
+    if (isOpen) {
       totalOpenMs += Math.max(0, now - prevTime);
+      if (lastOpenedTs === undefined && Number.isFinite(openSinceTs) && openSinceTs >= todayStartMs) lastOpenedTs = openSinceTs;
     }
-    const openSinceMs = isOpen && Number.isFinite(liveSince) ? now - liveSince : undefined;
+
+    const openSinceMs = isOpen && Number.isFinite(openSinceTs) ? now - openSinceTs : undefined;
     return { isOpen, openCount, lastOpenedTs, totalOpenMs, openSinceMs, hasHistory: series.length > 0 };
   }
 
