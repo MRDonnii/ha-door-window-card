@@ -1,4 +1,4 @@
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const TICK_MS = 30 * 1000;
@@ -137,20 +137,28 @@ class HADoorWindowCard extends HTMLElement {
     const live = this._s(item.entity);
     const isOpen = live?.state === "on";
 
-    // "Opened since" comes from the recorder history's last state-change row, not the live
-    // entity's last_changed attribute. last_changed resets to the moment of the last HA Core
-    // restart, which would otherwise silently reset this counter for a door/window that was
-    // already open before the restart — recorder history rows persist across restarts.
-    // Only trust this when the fetched window actually contains the transition into "on"
-    // (i.e. there is a preceding row with a different state): if the entire lookback window
-    // is already "on" with nothing before it, that row's timestamp is just an artifact of
-    // where the query happened to start, not a real event — falling back to last_changed
-    // avoids reporting a wildly wrong multi-day duration for a window that opened recently.
+    // "Opened since" must survive HA Core restarts, so live.last_changed (which resets on
+    // every restart, even without a real state change) is only used as a last resort.
+    // Priority 1: the integration's own last_tripped_time attribute, when present — this is
+    // reported by the device/integration itself (not HA's state machine), so it is generally
+    // unaffected by HA restarts and is the most trustworthy source when available.
+    // Priority 2: the recorder history's last state-change row, but only when the fetched
+    // window actually contains the transition into "on" (a preceding row with a different
+    // state) — if the whole lookback window was already "on", that row's timestamp is just
+    // an artifact of where the query happened to start, not a real event.
+    // Priority 3: live.last_changed, which may read as "just now" right after a restart.
     let openSinceTs;
-    const lastIdx = series.length - 1;
-    if (lastIdx >= 0 && series[lastIdx].state === "on" && lastIdx > 0) {
-      const t = new Date(series[lastIdx].last_changed || series[lastIdx].last_updated).getTime();
-      if (Number.isFinite(t)) openSinceTs = t;
+    const trippedRaw = live?.attributes?.last_tripped_time;
+    if (trippedRaw) {
+      const t = new Date(trippedRaw).getTime();
+      if (Number.isFinite(t) && t <= now) openSinceTs = t;
+    }
+    if (openSinceTs === undefined) {
+      const lastIdx = series.length - 1;
+      if (lastIdx >= 0 && series[lastIdx].state === "on" && lastIdx > 0) {
+        const t = new Date(series[lastIdx].last_changed || series[lastIdx].last_updated).getTime();
+        if (Number.isFinite(t)) openSinceTs = t;
+      }
     }
     if (openSinceTs === undefined && live?.last_changed) {
       const t = new Date(live.last_changed).getTime();
