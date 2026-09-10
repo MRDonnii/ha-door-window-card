@@ -1,4 +1,4 @@
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const TICK_MS = 30 * 1000;
@@ -141,9 +141,15 @@ class HADoorWindowCard extends HTMLElement {
     // entity's last_changed attribute. last_changed resets to the moment of the last HA Core
     // restart, which would otherwise silently reset this counter for a door/window that was
     // already open before the restart — recorder history rows persist across restarts.
+    // Only trust this when the fetched window actually contains the transition into "on"
+    // (i.e. there is a preceding row with a different state): if the entire lookback window
+    // is already "on" with nothing before it, that row's timestamp is just an artifact of
+    // where the query happened to start, not a real event — falling back to last_changed
+    // avoids reporting a wildly wrong multi-day duration for a window that opened recently.
     let openSinceTs;
-    if (series.length && series[series.length - 1].state === "on") {
-      const t = new Date(series[series.length - 1].last_changed || series[series.length - 1].last_updated).getTime();
+    const lastIdx = series.length - 1;
+    if (lastIdx >= 0 && series[lastIdx].state === "on" && lastIdx > 0) {
+      const t = new Date(series[lastIdx].last_changed || series[lastIdx].last_updated).getTime();
       if (Number.isFinite(t)) openSinceTs = t;
     }
     if (openSinceTs === undefined && live?.last_changed) {
