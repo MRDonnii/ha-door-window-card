@@ -1,4 +1,4 @@
-const VERSION = "0.2.2";
+const VERSION = "0.3.0";
 
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const TICK_MS = 30 * 1000;
@@ -81,9 +81,16 @@ class HADoorWindowCard extends HTMLElement {
       const path = `history/period/${encodeURIComponent(start.toISOString())}?filter_entity_id=${encodeURIComponent(ids.join(","))}&minimal_response&no_attributes`;
       const result = await this._hass.callApi("GET", path);
       const history = {};
-      for (const series of Array.isArray(result) ? result : []) {
-        const id = series.find((row) => row.entity_id)?.entity_id;
-        if (id) history[id] = series;
+      // Match series to entities by position, not by an `entity_id` field on each row: in
+      // minimal_response mode (used here to keep the payload small for many entities) rows
+      // generally don't carry entity_id at all, so searching for it silently produced an
+      // always-empty history. The history/period endpoint guarantees the outer array's order
+      // matches the filter_entity_id list we requested.
+      if (Array.isArray(result)) {
+        result.forEach((series, index) => {
+          const id = ids[index];
+          if (id && Array.isArray(series)) history[id] = series;
+        });
       }
       this._history = history;
       this._historyDay = today;
@@ -265,7 +272,7 @@ class HADoorWindowCard extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;--good:var(--dashboard-success, var(--success-color, #20e3a2));--warn:var(--dashboard-warning, var(--warning-color, #f59e0b));--danger:var(--dashboard-danger, var(--error-color, #ef4444));--accent:var(--dashboard-accent, var(--info-color, #38bdf8));--edge:var(--dashboard-border-neutral, var(--divider-color, rgba(127,145,165,.2)));--muted:var(--dashboard-icon-muted, var(--disabled-text-color, #64748b))}
       *{box-sizing:border-box}
-      ha-card{padding:22px;border-radius:26px;background:linear-gradient(150deg,color-mix(in srgb,var(--card-background-color) 94%,var(--accent) 6%),var(--card-background-color));border:1px solid var(--edge);color:var(--primary-text-color);box-shadow:var(--ha-card-box-shadow)}
+      ha-card{padding:16px;border-radius:22px;background:var(--card-background-color);border:0;color:var(--primary-text-color);box-shadow:var(--ha-card-box-shadow)}
       .head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
       .head ha-icon{--mdc-icon-size:26px;color:var(--accent)}
       .head strong{display:block;font-size:16px}
