@@ -49,11 +49,22 @@ midnight.
 
 ### Open-duration survives Home Assistant restarts
 
-The "currently open for" counter is derived from the entity's recorder
-history (the timestamp of its last state-change row), not from the live
-entity's `last_changed` attribute. `last_changed` resets to the moment of
-the last Home Assistant Core restart even when the sensor's actual state
-hasn't changed, which would otherwise make a door that's been open for
-hours suddenly show "just opened" after any restart. The card fetches a
-10-day history window (`HISTORY_LOOKBACK_DAYS`) so the true start of an
+The "currently open for" counter does **not** use the live entity's
+`last_changed` attribute, which resets to the moment of the last Home
+Assistant Core restart even when the sensor's actual state hasn't changed
+— that would otherwise make a door that's been open for hours suddenly
+show "just opened" after any restart. Instead it prefers, in order:
+
+1. The entity's own `last_tripped_time` attribute, when the integration
+   exposes one — reported by the device/integration itself, so it's
+   generally unaffected by HA restarts and is the most trustworthy source.
+2. The recorder history's last state-change row, but only when the
+   fetched window actually contains the transition into "on" (a
+   preceding row with a different state) — if the whole lookback window
+   was already "on", that row's timestamp is just an artifact of where
+   the query happened to start, not a real event.
+3. `live.last_changed`, as a last resort.
+
+The card fetches a 10-day history window (`HISTORY_LOOKBACK_DAYS`) so the
+true start of an
 in-progress open period can be recovered even across a restart.
