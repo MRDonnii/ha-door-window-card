@@ -68,3 +68,13 @@ show "just opened" after any restart. Instead it prefers, in order:
 The card fetches a 10-day history window (`HISTORY_LOOKBACK_DAYS`) so the
 true start of an
 in-progress open period can be recovered even across a restart.
+
+**v0.3.0 fix:** the history response is requested with `minimal_response`
+to keep the payload small across many entities, which generally omits an
+`entity_id` field from each row. Earlier versions matched each returned
+series back to its entity by searching for that field and came up empty
+for every entity, silently breaking "times opened today" and "total open
+time today" (always showing "< 1 min"). The card now matches series to
+entities by position in the response array instead, which the
+`history/period` endpoint guarantees matches the requested
+`filter_entity_id` order.
