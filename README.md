@@ -1,5 +1,12 @@
 # HA Door/Window Card
 
+## Neutral mobile preview
+
+![Neutral mobile preview of ha-door-window-card](docs/preview.png)
+
+> Rendered at 390 px mobile width with fictional Home Assistant entities and values. No private dashboard, person, address, camera, or sensor data is included.
+
+
 A Home Assistant Lovelace card that shows **every** door and window contact
 sensor at once — open or closed — instead of only surfacing the ones that
 happen to be open right now.
